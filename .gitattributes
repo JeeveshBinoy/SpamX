@@ -1,0 +1,84 @@
+# --- OS & IDE Specific ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+.idea/
+*.iws
+*.iml
+*~
+*.swp
+
+# --- Environments & Dependencies ---
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+ENV/
+*.egg-info/
+dist/
+build/
+out/
+bin/
+obj/
+
+# --- Secrets & Logs ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.log
+logs/
+
+# --- Machine Learning Models & Large Binaries ---
+# Specific to XLM-RoBERTa / MuRIL / Transformers
+*.bin
+*.pt
+*.pth
+*.h5
+*.keras
+*.pb
+*.weights
+*.ckpt
+pytorch_model.bin
+tf_model.h5
+model.safetensors
+checkpoint-*/
+variables/
+
+# Serialized Objects
+*.pkl
+*.joblib
+
+# --- Data & Datasets (Avoid >100MB) ---
+data/
+datasets/
+corpus/
+*.csv
+*.tsv
+*.jsonl
+*.sqlite
+*.db
+*.zip
+*.tar.gz
+*.7z
+
+# --- Large File Safety Net ---
+# Ignore any file that might be a large binary or archive
+*.exe
+*.dll
+*.so
+*.dylib
