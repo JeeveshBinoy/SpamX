@@ -206,7 +206,11 @@ class SpamXEngine {
             const normalizedNodeText = this._normalizeText(rawNodeText);
             
             // Fuzzy match (handles truncations or slight formatting diffs between API and DOM)
-            if (normalizedNodeText === normalizedText || normalizedNodeText.includes(normalizedText) || normalizedText.includes(normalizedNodeText)) {
+            const lengthDiff = Math.abs(normalizedNodeText.length - normalizedText.length);
+            const isFuzzyMatch = (normalizedNodeText === normalizedText) || 
+                                 (lengthDiff < 5 && (normalizedNodeText.includes(normalizedText) || normalizedText.includes(normalizedNodeText)));
+            
+            if (isFuzzyMatch) {
                 const threadContainer = candidateNode.closest("ytd-comment-thread-renderer, ytd-comment-renderer, ytd-reel-comment-renderer, yt-live-chat-text-message-renderer");
                 const hasCreatorBadge = threadContainer?.querySelector("ytd-author-comment-badge-renderer") !== null;
                 
@@ -238,9 +242,12 @@ class SpamXEngine {
             // Check cache for existing classification
             let cachedResult = this.cache.get(normalizedContent);
             if (!cachedResult) {
-                // Secondary fallback: Partial cache match
+                // Secondary fallback: Partial cache match with strict length limits
                 for (const [cachedKey, resultValue] of this.cache.entries()) {
-                    if (normalizedContent === cachedKey || normalizedContent.includes(cachedKey) || cachedKey.includes(normalizedContent)) {
+                    const lengthDiff = Math.abs(normalizedContent.length - cachedKey.length);
+                    const isFuzzyMatch = (normalizedContent === cachedKey) || 
+                                         (lengthDiff < 5 && (normalizedContent.includes(cachedKey) || cachedKey.includes(normalizedContent)));
+                    if (isFuzzyMatch) {
                         cachedResult = resultValue;
                         break;
                     }
