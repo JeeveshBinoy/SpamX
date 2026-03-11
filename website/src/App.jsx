@@ -6,197 +6,220 @@ import ExplanationBox from './components/ExplanationBox.jsx';
 import TokenHeatmap from './components/TokenHeatmap.jsx';
 import TokenWeightGraph from './components/TokenWeightGraph.jsx';
 
-import { callGradio, BACKEND_URL } from './api.js';
+import { callAnalyze, BACKEND_URL } from './api.js';
 
 function App() {
-  const [text, setText] = useState('');
-  const [model, setModel] = useState('Ensemble');
-  const [prediction, setPrediction] = useState(null);
-  const [explanation, setExplanation] = useState(null);
-  const [featureImage, setFeatureImage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingExplanation, setLoadingExplanation] = useState(false);
-  const [error, setError] = useState(null);
-  const [winningModel, setWinningModel] = useState(null);
+  // --- STATE MANAGEMENT ---
+  const [text, setText] = useState('');                      // The current comment text in the input box
+  const [model, setModel] = useState('Ensemble');            // The user-selected model from the dropdown
+  const [prediction, setPrediction] = useState(null);        // The classification result (spam/ham)
+  const [explanation, setExplanation] = useState(null);      // Processed SHAP/token data
+  const [featureImage, setFeatureImage] = useState(null);    // The SHAP summary plot (base64 or URL)
+  const [loading, setLoading] = useState(false);             // Global loading state for classification
+  const [loadingExplanation, setLoadingExplanation] = useState(false); // Specific loading for SHAP data
+  const [error, setError] = useState(null);                  // Error message from the backend
+  const [winningModel, setWinningModel] = useState(null);    // The specific model that led the decision (e.g. MuRIL)
 
+  /**
+   * Effect Hook: Handles redirection from the SpamX Extension.
+   * If the user clicks "Insights" in the extension, we parse the comment 
+   * data and pre-fill the classification results to avoid redundant work.
+   */
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const comment = params.get('comment');
-    if (comment) {
-      setText(comment);
-      runScan(comment, model);
+    const searchParams = new URLSearchParams(window.location.search);
+    const redirectedComment = searchParams.get('comment');
+    const redirectedLabel = searchParams.get('label');
+    const redirectedConfidence = parseFloat(searchParams.get('conf'));
+    const redirectedModel = searchParams.get('model');
+
+    if (redirectedComment) {
+      setText(redirectedComment);
+      if (redirectedModel) setModel(redirectedModel);
+
+      // If we already have a prediction from the extension, show it immediately
+      if (redirectedLabel && !isNaN(redirectedConfidence)) {
+        setPrediction({
+          label: redirectedLabel.toLowerCase(),
+          confidence: redirectedConfidence,
+          spamProb: redirectedLabel.toLowerCase() === 'spam' ? redirectedConfidence : 1 - redirectedConfidence,
+          hamProb: redirectedLabel.toLowerCase() === 'ham' ? redirectedConfidence : 1 - redirectedConfidence,
+          markdownText: `Pre-analyzed by SpamX Extension (${redirectedModel || 'Ensemble'})`
+        });
+        setWinningModel(redirectedModel || 'Integrated Ensemble');
+        
+        // Trigger a background scan to fetch the SHAP explanation data
+        runScan(redirectedComment, redirectedModel || model, true);
+      } else {
+        // Otherwise, start a fresh analysis
+        runScan(redirectedComment, redirectedModel || model);
+      }
     }
   }, []);
 
-  const runScan = async (inputText, currentModel) => {
-    const targetText = inputText !== undefined ? inputText : text;
-    if (!targetText.trim()) return;
+  /**
+   * runScan: The core analysis orchestrator.
+   * Communicates with the Django backend to classify text and get token importance.
+   * 
+   * @param {string} inputText - Optional text override (from URL params).
+   * @param {string} currentModel - Optional model override.
+   * @param {boolean} skipPredict - If true, only fetches explanation data (optimizes extension flow).
+   */
+  const runScan = async (inputText, currentModel, skipPredict = false) => {
+    const processedInputText = inputText !== undefined ? inputText : text;
+    if (!processedInputText.trim()) return;
 
-    setLoading(true);
+    setLoading(!skipPredict);
     setLoadingExplanation(true);
     setError(null);
-    setPrediction(null);
+    
+    // Clear previous results if we're doing a full fresh scan
+    if (!skipPredict) {
+      setPrediction(null);
+      setWinningModel(null);
+    }
     setExplanation(null);
     setFeatureImage(null);
-    setWinningModel(null);
-
 
     try {
-      const predictResult = await callGradio('/predict', [targetText, currentModel || model]);
-      const labelData = predictResult?.[0];
-      const markdownText = predictResult?.[1] || '';
+      // Unified call: Get both prediction and explanation in ONE network request
+      const responseData = await callAnalyze(processedInputText, currentModel || model);
+      
+      if (responseData.error) throw new Error(responseData.error);
 
-      if (labelData) {
-        const confidences = labelData.confidences || [];
-        const spamConf = confidences.find(c => c.label?.toLowerCase() === 'spam')?.confidence ?? 0;
-        const hamConf = confidences.find(c => c.label?.toLowerCase() === 'ham')?.confidence ?? 0;
+      // 1. Process Classification Result
+      const subModelConfidences = responseData.confidences || [];
+      const spamProbability = responseData.spamProb || 0;
+      const hamProbability = responseData.hamProb || 0;
 
-
-        let winMod = currentModel;
-        if (currentModel === 'Ensemble') {
-          const maxConf = Math.max(...confidences.map(c => c.confidence));
-          const winner = confidences.find(c => (c.confidence === maxConf) && !['HAM', 'SPAM', 'LABEL_0', 'LABEL_1'].includes(c.label.toUpperCase()));
-          winMod = winner ? winner.label : 'Integrated Ensemble';
-        }
-        setWinningModel(winMod);
-
-        setPrediction({
-          label: labelData.label || 'ham',
-          confidence: Math.max(spamConf, hamConf),
-          spamProb: spamConf,
-          hamProb: hamConf,
-          markdownText
-        });
+      let identifiedDecisionModel = currentModel;
+      
+      // If using Ensemble, look for the specific winning sub-model
+      if (currentModel === 'Ensemble') {
+        const maxConfidenceValue = Math.max(...subModelConfidences.map(item => item.confidence));
+        const dominantModel = subModelConfidences.find(item => 
+          (item.confidence === maxConfidenceValue) && 
+          !['HAM', 'SPAM', 'LABEL_0', 'LABEL_1'].includes(item.label.toUpperCase())
+        );
+        identifiedDecisionModel = dominantModel ? dominantModel.label : 'Integrated Ensemble';
       }
-      setLoading(false);
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-      setLoadingExplanation(false);
-      return;
-    }
+      setWinningModel(identifiedDecisionModel || 'Integrated Ensemble');
 
+      setPrediction({
+        label: responseData.label || 'ham',
+        confidence: responseData.confidence || 0,
+        spamProb: spamProbability,
+        hamProb: hamProbability,
+        markdownText: responseData.markdown_text || ''
+      });
 
-    try {
-      const explainResult = await callGradio('/explain', [targetText, currentModel || model]);
-      const imgData = explainResult?.[0];
-      const htmlStr = explainResult?.[1] || '';
-      const dfData = explainResult?.[2];
+      // 2. Process SHAP Visualization Image
+      if (responseData.image?.url) setFeatureImage(responseData.image.url);
+      else if (responseData.image?.path) setFeatureImage(`${BACKEND_URL}/gradio_api/file=${responseData.image.path}`);
 
-      if (imgData?.url) setFeatureImage(imgData.url);
-      else if (imgData?.path) setFeatureImage(`${BACKEND_URL}/gradio_api/file=${imgData.path}`);
-
-
-      if (currentModel === 'Ensemble' && htmlStr) {
-
-        const cleanText = htmlStr.replace(/<[^>]*>/g, ' ').replace(/\*\*/g, ' ');
-
-
-        if (cleanText.includes('MuRIL')) setWinningModel('MuRIL');
-        else if (cleanText.includes('XLM-RoBERTa')) setWinningModel('XLM-RoBERTa');
-        else {
-
-          const modelMatch = cleanText.match(/provided by\s+([A-Za-z0-9\-\.]+)/i) ||
-            cleanText.match(/model:?\s+([A-Za-z0-9\-\.]+)/i) ||
-            cleanText.match(/By\s+([A-Za-z0-9\-\.]+)/i) ||
-            cleanText.match(/diagnosis was provided by\s+([A-Za-z0-9\-\.]+)/i) ||
-            cleanText.match(/chooses\s+([A-Za-z0-9\-\.]+)/i);
-
-          if (modelMatch) {
-            const foundModel = modelMatch[1].trim();
-            const blackList = ['SPAM', 'HAM', 'RESULT', 'WAS', 'IS', 'THE', 'LABEL', 'A', 'FOR', 'AND', 'BY', 'THIS', 'DIAGNOSIS'];
-            if (foundModel && !blackList.includes(foundModel.toUpperCase())) {
-              setWinningModel(foundModel);
-            }
-          }
-        }
+      // Sync winning model name from explanation text if it's an ensemble decision
+      const explanationHtml = responseData.html || '';
+      if (currentModel === 'Ensemble' && explanationHtml) {
+        const cleanExplanationText = explanationHtml.replace(/<[^>]*>/g, ' ').replace(/\*\*/g, ' ');
+        if (cleanExplanationText.includes('MuRIL')) setWinningModel('MuRIL');
+        else if (cleanExplanationText.includes('XLM-RoBERTa')) setWinningModel('XLM-RoBERTa');
       }
 
-      if (dfData?.data && dfData.data.length > 0) {
-        let tokens = dfData.data.map(row => row[0]);
-        const values = dfData.data.map(row => {
+      // 3. TOKEN RECOVERY SYSTEM
+      // ML models often break emojis and unknown characters into "[UNK]" tokens.
+      // This logic cross-references the tokens with the original text to recover the actual characters.
+      const rawShapData = responseData.dataframe;
+      if (rawShapData?.data && rawShapData.data.length > 0) {
+        let rawTokens = rawShapData.data.map(row => row[0]);
+        const importanceValues = rawShapData.data.map(row => {
           let val = row[1];
           return typeof val === 'number' ? val : parseFloat(val) || 0;
         });
 
-
         try {
-          let remainingText = targetText;
-          const recoveredTokens = tokens.map((t, idx) => {
-            const lowerT = t.toLowerCase();
-            if (lowerT === '[unk]' || lowerT === '<unk>' || !t.trim()) {
-
-              let lookAheadIdx = idx + 1;
-              let nextKnown = null;
-              let nextPos = -1;
-
-              while (lookAheadIdx < tokens.length) {
-                const lat = tokens[lookAheadIdx];
-                const cleanLat = lat.replace(/^##/, '').replace(/^[ _ ]/, '').replace(/ /g, '').trim();
-                if (cleanLat && remainingText.includes(cleanLat)) {
-                  nextKnown = cleanLat;
-                  nextPos = remainingText.indexOf(cleanLat);
+          let slidingTextPointer = processedInputText;
+          const recoveredTokens = rawTokens.map((currentToken, idx) => {
+            const tokenLower = currentToken.toLowerCase();
+            
+            // If the token is unknown or just whitespace, attempt recovery
+            if (tokenLower === '[unk]' || tokenLower === '<unk>' || !currentToken.trim()) {
+              slidingTextPointer = slidingTextPointer.trimStart();
+              
+              // Look ahead for the next distinguishable token to find the 'UNK' boundary
+              let nextKnownToken = null;
+              let nextTokenPosition = -1;
+              let lookAheadCounter = idx + 1;
+              
+              while (lookAheadCounter < rawTokens.length) {
+                const nextT = rawTokens[lookAheadCounter];
+                const cleanNextT = nextT.replace(/^##/, '').replace(/^[ _ ]/, '').replace(/ /g, '').trim();
+                if (cleanNextT && slidingTextPointer.includes(cleanNextT)) {
+                  nextKnownToken = cleanNextT;
+                  nextTokenPosition = slidingTextPointer.indexOf(cleanNextT);
                   break;
                 }
-                lookAheadIdx++;
+                lookAheadCounter++;
               }
 
-              if (nextPos !== -1) {
-
-                let sequentialUnks = 1;
-                let i = idx + 1;
-                while (i < lookAheadIdx) {
-                  const sit = tokens[i].toLowerCase();
-                  if (sit === '[unk]' || sit === '<unk>' || !tokens[i].trim()) sequentialUnks++;
-                  i++;
+              if (nextTokenPosition !== -1) {
+                // Determine how many sequential 'UNK' tokens we are currently filling
+                let sequentialUnkCount = 1;
+                for (let i = idx + 1; i < lookAheadCounter; i++) {
+                  const seqT = rawTokens[i].toLowerCase();
+                  if (seqT === '[unk]' || seqT === '<unk>' || !rawTokens[i].trim()) sequentialUnkCount++;
                 }
 
-                const segment = remainingText.substring(0, nextPos);
-                remainingText = remainingText.substring(nextPos);
-
-                const chars = Array.from(segment);
-                const charsPerUnk = Math.max(1, Math.floor(chars.length / sequentialUnks));
-                const recovered = chars.slice(0, charsPerUnk).join('');
-                return recovered || t;
+                // Slice the original text that corresponds to this 'UNK' group
+                const recoveredSegment = slidingTextPointer.substring(0, nextTokenPosition);
+                slidingTextPointer = slidingTextPointer.substring(nextTokenPosition);
+                
+                // Distribute characters among the UNK group (simple heuristic)
+                const segmentChars = Array.from(recoveredSegment);
+                const charsAllocated = Math.max(1, Math.floor(segmentChars.length / sequentialUnkCount));
+                return segmentChars.slice(0, charsAllocated).join('') || currentToken;
               }
 
-              const chars = Array.from(remainingText);
-              if (chars.length > 0) {
-                const recovered = chars[0];
-                remainingText = remainingText.substring(recovered.length);
-                return recovered;
+              // Fallback: Just grab the next character
+              const remainingChars = Array.from(slidingTextPointer);
+              if (remainingChars.length > 0) {
+                const singleChar = remainingChars[0];
+                slidingTextPointer = slidingTextPointer.substring(singleChar.length);
+                return singleChar;
               }
-              return t;
+              return currentToken;
             } else {
-              const cleanT = t.replace(/^##/, '').replace(/^[ _ ]/, '').replace(/ /g, '');
-              if (cleanT) {
-                const pos = remainingText.indexOf(cleanT);
+              // Standard token: Move the text pointer past the matched content
+              const cleanTokenText = currentToken.replace(/^##/, '').replace(/^[ _ ]/, '').replace(/ /g, '');
+              if (cleanTokenText) {
+                const pos = slidingTextPointer.indexOf(cleanTokenText);
                 if (pos !== -1) {
-                  remainingText = remainingText.substring(pos + cleanT.length);
+                  slidingTextPointer = slidingTextPointer.substring(pos + cleanTokenText.length);
                 }
               }
-              return t;
+              return currentToken;
             }
           });
 
+          // Filter out empty tokens or structural markers for the final display
+          const finalProcessedData = recoveredTokens.map((tokenText, i) => ({ t: tokenText, v: importanceValues[i] }))
+            .filter(item => item.t && item.t.length > 0 && !['[unk]', '<unk>'].includes(item.t.toLowerCase()));
 
-          const processed = recoveredTokens.map((t, i) => ({ t, v: values[i] }))
-            .filter(item => item.t && item.t.trim().length > 0 && !['[unk]', '<unk>'].includes(item.t.toLowerCase()));
-
-          tokens = processed.map(x => x.t);
-          const finalValues = processed.map(x => x.v);
-
-          setExplanation({ tokens, values: finalValues, html: htmlStr });
-        } catch (e) {
-          console.warn("Token recovery failed", e);
-          setExplanation({ tokens, values, html: htmlStr });
+          setExplanation({ 
+            tokens: finalProcessedData.map(x => x.t), 
+            values: finalProcessedData.map(x => x.v), 
+            html: explanationHtml 
+          });
+        } catch (recoveryError) {
+          console.error("Token recovery failed:", recoveryError);
+          setExplanation({ tokens: rawTokens, values: importanceValues, html: explanationHtml });
         }
       } else {
-        setExplanation({ tokens: [], values: [], html: htmlStr });
+        setExplanation({ tokens: [], values: [], html: explanationHtml });
       }
-    } catch (err) {
-      console.error("Explanation failed:", err);
+
+    } catch (apiError) {
+      setError(apiError.message);
     } finally {
+      setLoading(false);
       setLoadingExplanation(false);
     }
   };
@@ -213,7 +236,6 @@ function App() {
       <Navbar />
 
       <main className="flex-1 flex flex-col lg:flex-row w-full h-full relative z-10 overflow-hidden">
-        {}
         <div className="w-full lg:w-[400px] border-r border-slate-800/50 bg-black/20 backdrop-blur-3xl p-8 flex flex-col gap-8 overflow-y-auto">
           <CommentInput
             text={text}
@@ -226,7 +248,6 @@ function App() {
           />
         </div>
 
-        {}
         <div className="flex-1 overflow-y-auto p-10 relative">
           {!prediction && !loading && !error && (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-30 select-none">
