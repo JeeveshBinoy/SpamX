@@ -16,7 +16,7 @@ def get_client():
     try:
         from gradio_client import Client
         # Fetch configuration from Django settings (populated from .env)
-        space_id = getattr(settings, "HF_SPACE_ID", "SpamX/SpamX")
+        space_id = getattr(settings, "HF_SPACE_ID", "SpamX/SpamX_HF")
         hf_token = getattr(settings, "HF_TOKEN", None)
         
         safe_log(f"[{datetime.now()}] Initializing connection to HuggingFace Space: {space_id}")
@@ -49,6 +49,41 @@ def safe_log(message):
             print(sanitized_message, flush=True)
         except:
             pass
+
+import os
+import base64
+
+def _encode_image(image_input):
+    """
+    Safely converts a Gradio image result (string path or dict) into a base64 string
+    that the frontend can render immediately.
+    """
+    if not image_input:
+        return None
+        
+    image_path = None
+    if isinstance(image_input, str):
+        image_path = image_input
+    elif isinstance(image_input, dict) and "path" in image_input:
+        image_path = image_input["path"]
+        
+    # If the space returns a URL, we can just use the URL
+    if isinstance(image_input, dict) and "url" in image_input and image_input["url"]:
+        return image_input["url"]
+        
+    # Encode local file
+    if image_path and os.path.exists(image_path):
+        try:
+            with open(image_path, "rb") as f:
+                encoded = base64.b64encode(f.read()).decode('utf-8')
+                # Determine mime type roughly
+                ext = image_path.lower().split(".")[-1]
+                mime = "image/png" if ext == "png" else "image/jpeg" if ext in ["jpg", "jpeg"] else "image/webp"
+                return f"data:{mime};base64,{encoded}"
+        except Exception as e:
+            safe_log(f"[{datetime.now()}] Image encode failed: {e}")
+            
+    return None
 
 def _extract_confidence(prediction_data):
     """

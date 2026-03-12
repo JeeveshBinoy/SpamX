@@ -9,7 +9,7 @@ load_dotenv(BASE_DIR / ".env")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
 # HuggingFace
-HF_SPACE_ID = os.getenv("HF_SPACE_ID", "SpamX/SpamX")
+HF_SPACE_ID = os.getenv("HF_SPACE_ID", "SpamX/SpamX_HF")
 HF_TOKEN = os.getenv("HF_TOKEN", None)
 
 SECRET_KEY = 'django-insecure-@$*@-db5)zn%pa&oq(w9^l+_7$nlz2-x+1=4-+oj3fcj^_9r+c'

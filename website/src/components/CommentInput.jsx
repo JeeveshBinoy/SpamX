@@ -33,7 +33,7 @@ export default function CommentInput({ text, setText, model, setModel, loading, 
             <button
                 onClick={onScan}
                 disabled={loading || !text.trim()}
-                className="w-full py-3.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-xl font-black uppercase tracking-widest text-xs hover:brightness-110 hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-violet-900/30"
+                className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-orange-600 rounded-xl font-black uppercase tracking-widest text-xs hover:brightness-110 hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-orange-900/20 text-white"
             >
                 {loading ? (
                     <span className="flex items-center justify-center gap-2">

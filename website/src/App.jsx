@@ -5,6 +5,8 @@ import VerdictBanner from './components/VerdictBanner.jsx';
 import ExplanationBox from './components/ExplanationBox.jsx';
 import TokenHeatmap from './components/TokenHeatmap.jsx';
 import TokenWeightGraph from './components/TokenWeightGraph.jsx';
+import ShapHtml from './components/ShapHtml.jsx';
+import ShapDataframe from './components/ShapDataframe.jsx';
 
 import { callAnalyze, BACKEND_URL } from './api.js';
 
@@ -14,7 +16,6 @@ function App() {
   const [model, setModel] = useState('Ensemble');            // The user-selected model from the dropdown
   const [prediction, setPrediction] = useState(null);        // The classification result (spam/ham)
   const [explanation, setExplanation] = useState(null);      // Processed SHAP/token data
-  const [featureImage, setFeatureImage] = useState(null);    // The SHAP summary plot (base64 or URL)
   const [loading, setLoading] = useState(false);             // Global loading state for classification
   const [loadingExplanation, setLoadingExplanation] = useState(false); // Specific loading for SHAP data
   const [error, setError] = useState(null);                  // Error message from the backend
@@ -78,7 +79,6 @@ function App() {
       setWinningModel(null);
     }
     setExplanation(null);
-    setFeatureImage(null);
 
     try {
       // Unified call: Get both prediction and explanation in ONE network request
@@ -112,9 +112,7 @@ function App() {
         markdownText: responseData.markdown_text || ''
       });
 
-      // 2. Process SHAP Visualization Image
-      if (responseData.image?.url) setFeatureImage(responseData.image.url);
-      else if (responseData.image?.path) setFeatureImage(`${BACKEND_URL}/gradio_api/file=${responseData.image.path}`);
+
 
       // Sync winning model name from explanation text if it's an ensemble decision
       const explanationHtml = responseData.html || '';
@@ -123,95 +121,17 @@ function App() {
         if (cleanExplanationText.includes('MuRIL')) setWinningModel('MuRIL');
         else if (cleanExplanationText.includes('XLM-RoBERTa')) setWinningModel('XLM-RoBERTa');
       }
-
-      // 3. TOKEN RECOVERY SYSTEM
-      // ML models often break emojis and unknown characters into "[UNK]" tokens.
-      // This logic cross-references the tokens with the original text to recover the actual characters.
       const rawShapData = responseData.dataframe;
       if (rawShapData?.data && rawShapData.data.length > 0) {
-        let rawTokens = rawShapData.data.map(row => row[0]);
-        const importanceValues = rawShapData.data.map(row => {
-          let val = row[1];
-          return typeof val === 'number' ? val : parseFloat(val) || 0;
+        const tokens = rawShapData.data.map(row => row[0]);
+        const values = rawShapData.data.map(row => typeof row[1] === 'number' ? row[1] : parseFloat(row[1]) || 0);
+
+        setExplanation({
+            tokens: tokens,
+            values: values,
+            html: explanationHtml,
+            dataframe: rawShapData
         });
-
-        try {
-          let slidingTextPointer = processedInputText;
-          const recoveredTokens = rawTokens.map((currentToken, idx) => {
-            const tokenLower = currentToken.toLowerCase();
-            
-            // If the token is unknown or just whitespace, attempt recovery
-            if (tokenLower === '[unk]' || tokenLower === '<unk>' || !currentToken.trim()) {
-              slidingTextPointer = slidingTextPointer.trimStart();
-              
-              // Look ahead for the next distinguishable token to find the 'UNK' boundary
-              let nextKnownToken = null;
-              let nextTokenPosition = -1;
-              let lookAheadCounter = idx + 1;
-              
-              while (lookAheadCounter < rawTokens.length) {
-                const nextT = rawTokens[lookAheadCounter];
-                const cleanNextT = nextT.replace(/^##/, '').replace(/^[ _ ]/, '').replace(/ /g, '').trim();
-                if (cleanNextT && slidingTextPointer.includes(cleanNextT)) {
-                  nextKnownToken = cleanNextT;
-                  nextTokenPosition = slidingTextPointer.indexOf(cleanNextT);
-                  break;
-                }
-                lookAheadCounter++;
-              }
-
-              if (nextTokenPosition !== -1) {
-                // Determine how many sequential 'UNK' tokens we are currently filling
-                let sequentialUnkCount = 1;
-                for (let i = idx + 1; i < lookAheadCounter; i++) {
-                  const seqT = rawTokens[i].toLowerCase();
-                  if (seqT === '[unk]' || seqT === '<unk>' || !rawTokens[i].trim()) sequentialUnkCount++;
-                }
-
-                // Slice the original text that corresponds to this 'UNK' group
-                const recoveredSegment = slidingTextPointer.substring(0, nextTokenPosition);
-                slidingTextPointer = slidingTextPointer.substring(nextTokenPosition);
-                
-                // Distribute characters among the UNK group (simple heuristic)
-                const segmentChars = Array.from(recoveredSegment);
-                const charsAllocated = Math.max(1, Math.floor(segmentChars.length / sequentialUnkCount));
-                return segmentChars.slice(0, charsAllocated).join('') || currentToken;
-              }
-
-              // Fallback: Just grab the next character
-              const remainingChars = Array.from(slidingTextPointer);
-              if (remainingChars.length > 0) {
-                const singleChar = remainingChars[0];
-                slidingTextPointer = slidingTextPointer.substring(singleChar.length);
-                return singleChar;
-              }
-              return currentToken;
-            } else {
-              // Standard token: Move the text pointer past the matched content
-              const cleanTokenText = currentToken.replace(/^##/, '').replace(/^[ _ ]/, '').replace(/ /g, '');
-              if (cleanTokenText) {
-                const pos = slidingTextPointer.indexOf(cleanTokenText);
-                if (pos !== -1) {
-                  slidingTextPointer = slidingTextPointer.substring(pos + cleanTokenText.length);
-                }
-              }
-              return currentToken;
-            }
-          });
-
-          // Filter out empty tokens or structural markers for the final display
-          const finalProcessedData = recoveredTokens.map((tokenText, i) => ({ t: tokenText, v: importanceValues[i] }))
-            .filter(item => item.t && item.t.length > 0 && !['[unk]', '<unk>'].includes(item.t.toLowerCase()));
-
-          setExplanation({ 
-            tokens: finalProcessedData.map(x => x.t), 
-            values: finalProcessedData.map(x => x.v), 
-            html: explanationHtml 
-          });
-        } catch (recoveryError) {
-          console.error("Token recovery failed:", recoveryError);
-          setExplanation({ tokens: rawTokens, values: importanceValues, html: explanationHtml });
-        }
       } else {
         setExplanation({ tokens: [], values: [], html: explanationHtml });
       }
@@ -227,16 +147,11 @@ function App() {
   const isSpamTheme = prediction?.label?.toLowerCase() === 'spam';
 
   return (
-    <div className={`min-h-screen w-full flex flex-col font-sans transition-colors duration-700 ${isSpamTheme ? 'bg-[#0f0505] text-rose-50' : 'bg-[#050f0b] text-emerald-50'}`}>
-      <div className={`fixed inset-0 pointer-events-none transition-opacity duration-1000 ${prediction ? 'opacity-40' : 'opacity-20'}`}>
-        <div className={`absolute top-[-10%] left-[-5%] w-[60%] h-[60%] rounded-full blur-[120px] ${isSpamTheme ? 'bg-rose-900/30' : 'bg-emerald-900/30'}`}></div>
-        <div className={`absolute bottom-[-10%] right-[-5%] w-[60%] h-[60%] rounded-full blur-[120px] ${isSpamTheme ? 'bg-rose-800/20' : 'bg-emerald-800/20'}`}></div>
-      </div>
-
+    <div className={`min-h-screen w-full flex flex-col font-sans transition-colors duration-700 bg-[#0B0F19] text-slate-50`}>
       <Navbar />
 
       <main className="flex-1 flex flex-col lg:flex-row w-full h-full relative z-10 overflow-hidden">
-        <div className="w-full lg:w-[400px] border-r border-slate-800/50 bg-black/20 backdrop-blur-3xl p-8 flex flex-col gap-8 overflow-y-auto">
+        <div className="w-full lg:w-[400px] border-r border-slate-800/50 bg-[#0B0F19] p-8 flex flex-col gap-8 overflow-y-auto">
           <CommentInput
             text={text}
             setText={setText}
@@ -276,24 +191,32 @@ function App() {
           )}
 
           {prediction && (
-            <div className="max-w-4xl mx-auto space-y-8 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="h-full flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <VerdictBanner prediction={prediction} model={winningModel} modelChoice={model} />
 
-              {(explanation || loadingExplanation) && (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
-                  <div className="space-y-8">
-                    {explanation ? (
-                      <ExplanationBox prediction={prediction} explanation={explanation} model={winningModel} />
-                    ) : (
-                      <div className="p-8 bg-slate-900/40 rounded-3xl border border-slate-800/50 animate-pulse h-48"></div>
-                    )}
-                    {explanation && <TokenHeatmap explanation={explanation} prediction={prediction} />}
+              {(explanation || loadingExplanation) ? (
+                <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-6 overflow-hidden">
+                  {/* LEFT COLUMN: Narrative & Heatmap */}
+                  <div className="flex flex-col gap-6 min-h-0 overflow-hidden">
+                    <div className="flex-none bg-[#0B0F19]/50 border border-white/5 rounded-2xl p-4 overflow-y-auto max-h-[35%] custom-scrollbar">
+                      {explanation?.html ? <ShapHtml htmlString={explanation.html} /> : <div className="animate-pulse h-20 bg-slate-800/20 rounded-xl"></div>}
+                    </div>
+                    
+                    <div className="flex-1 min-h-0 bg-[#0B0F19]/50 border border-white/5 rounded-2xl p-4 overflow-y-auto custom-scrollbar">
+                        <div className="h-full">
+                            {explanation ? <TokenHeatmap explanation={explanation} prediction={prediction} /> : <div className="animate-pulse h-40 bg-slate-800/20 rounded-xl"></div>}
+                        </div>
+                    </div>
                   </div>
-                  <div className="bg-slate-900/20 rounded-3xl p-1">
-                    {explanation && <TokenWeightGraph explanation={explanation} model={winningModel} prediction={prediction} />}
+
+                  {/* RIGHT COLUMN: Graph ONLY */}
+                  <div className="flex flex-col min-h-0 overflow-hidden">
+                    <div className="flex-1 min-h-0 bg-[#0B0F19]/50 border border-white/5 rounded-2xl p-4 overflow-y-auto custom-scrollbar">
+                        {explanation ? <TokenWeightGraph explanation={explanation} model={winningModel} prediction={prediction} /> : <div className="animate-pulse h-full bg-slate-800/20 rounded-xl"></div>}
+                    </div>
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           )}
         </div>

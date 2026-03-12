@@ -10,8 +10,7 @@ export default function TokenWeightGraph({ explanation, model = "System", predic
     const isSpamVerdict = prediction?.label?.toUpperCase() === 'SPAM';
 
     const data = tokens.map((t, idx) => {
-        const centeredVal = isSpamVerdict ? -vals[idx] : vals[idx];
-        return { t, v: centeredVal, raw: vals[idx], id: idx };
+        return { t, v: vals[idx], raw: vals[idx], id: idx };
     });
 
     return (
@@ -24,22 +23,30 @@ export default function TokenWeightGraph({ explanation, model = "System", predic
                         <span className="text-slate-600 font-bold ml-1">({model})</span>
                     </p>
                     <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                        <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]"></div> Spam</span>
+                        <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div> HAM</span>
                         <div className="w-px h-3 bg-white/5"></div>
-                        <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div> Ham</span>
+                        <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]"></div> SPAM</span>
                     </div>
                 </div>
                 <div className="w-full h-px bg-gradient-to-r from-transparent via-slate-800/40 to-transparent"></div>
             </div>
 
-            <div className="bg-[#0f172a]/40 backdrop-blur-3xl border border-white/5 rounded-3xl p-8 shadow-[0_32px_64px_rgba(0,0,0,0.5)] relative overflow-hidden group/graph">
+            <div className="bg-[#0B0F19] border border-white/10 rounded-2xl p-4 shadow-lg relative overflow-hidden group/graph">
                 {/* Vertical Center Line */}
                 <div className="absolute top-0 bottom-0 left-[calc(110px+((100%-165px)/2))] w-[2px] bg-white/[0.05] z-0 pointer-events-none"></div>
 
-                <div className="space-y-5 relative z-10">
+                <div className="space-y-3 relative z-10">
                     {data.map((item, idx) => {
-                        const isHamSide = item.v > 0;
-                        const isSpamSide = item.v < 0;
+                        const isPositive = item.v > 0;
+                        const isSpamVerdict = prediction?.label?.toUpperCase() === 'SPAM';
+                        
+                        // Adaptive Side/Color:
+                        // If Spam: Positive is Red-Side (Right), Negative is Green-Side (Left)
+                        // If Ham: Positive is Green-Side (Right?), wait - usually Positive is Right.
+                        // User said: "emerald green for positvie and rose for negative values ... if idtentified as ham"
+                        // So Positive is ALWAYS Right side in this UI.
+                        const useRose = isSpamVerdict ? isPositive : !isPositive;
+                        const isPositiveSide = isPositive; 
                         const widthPct = (Math.abs(item.v) / maxAbs) * 50;
                         const isActive = hoverIdx === idx;
 
@@ -52,7 +59,7 @@ export default function TokenWeightGraph({ explanation, model = "System", predic
                             >
                                 {/* Token Label */}
                                 <div className="w-[100px] shrink-0 flex items-center justify-end px-2">
-                                    <span className={`text-[13px] font-black truncate transition-all duration-300 ${isActive ? (isHamSide ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-300'}`}>
+                                    <span className={`text-[13px] font-black truncate transition-all duration-300 ${isActive ? (useRose ? 'text-rose-400' : 'text-emerald-400') : 'text-slate-300'}`}>
                                         {item.t}
                                     </span>
                                 </div>
@@ -63,11 +70,11 @@ export default function TokenWeightGraph({ explanation, model = "System", predic
 
                                     {/* The Bar */}
                                     <div
-                                        className={`absolute h-full transition-all duration-1000 cubic-bezier(0.16, 1, 0.3, 1) ${isHamSide ? 'left-1/2 bg-gradient-to-r from-emerald-500/40 to-emerald-500' : 'right-1/2 bg-gradient-to-l from-rose-500/40 to-rose-500'}`}
+                                        className={`absolute h-full transition-all duration-1000 cubic-bezier(0.16, 1, 0.3, 1) ${isPositiveSide ? 'left-1/2 bg-gradient-to-r' : 'right-1/2 bg-gradient-to-l'} ${useRose ? 'from-rose-500/40 to-rose-500' : 'from-emerald-500/40 to-emerald-500'}`}
                                         style={{
                                             width: `${Math.max(2, widthPct)}%`,
-                                            borderRadius: isHamSide ? '0 9999px 9999px 0' : '9999px 0 0 9999px',
-                                            boxShadow: isActive ? (isHamSide ? '0 0 20px rgba(16,185,129,0.4)' : '0 0 20px rgba(244,63,94,0.4)') : 'none'
+                                            borderRadius: isPositiveSide ? '0 9999px 9999px 0' : '9999px 0 0 9999px',
+                                            boxShadow: isActive ? (useRose ? '0 0 20px rgba(244,63,94,0.4)' : '0 0 20px rgba(16,185,129,0.4)') : 'none'
                                         }}
                                     >
                                         <div className={`absolute inset-0 bg-white/20 transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -87,11 +94,14 @@ export default function TokenWeightGraph({ explanation, model = "System", predic
             </div>
 
             <div className="mt-6 flex justify-between items-center text-[10px] font-black uppercase tracking-[0.5em] text-slate-500/40 pl-[120px] pr-[60px] select-none">
-                <span className="text-rose-500/60 transition-colors hover:text-rose-500">SPAM</span>
+                <span className={`transition-colors ${isSpamVerdict ? 'text-emerald-500/60 hover:text-emerald-500' : 'text-rose-500/60 hover:text-rose-500'}`}>
+                    {isSpamVerdict ? 'HAM INFLUENCE' : 'SPAM INFLUENCE'}
+                </span>
                 <span className="opacity-10">NEUTRAL</span>
-                <span className="text-emerald-500/60 transition-colors hover:text-emerald-500">HAM</span>
+                <span className={`transition-colors ${isSpamVerdict ? 'text-rose-500/60 hover:text-rose-500' : 'text-emerald-500/60 hover:text-emerald-500'}`}>
+                    {isSpamVerdict ? 'SPAM INFLUENCE' : 'HAM INFLUENCE'}
+                </span>
             </div>
         </div>
     );
 }
-

@@ -4,6 +4,7 @@
  */
 export const BACKEND_URL = "https://backend-delta-roan-60.vercel.app";
 
+
 /**
  * callAnalyze: Performs a high-performance unified analysis (classification + explanation).
  * 
@@ -17,10 +18,10 @@ export async function callAnalyze(text, modelChoice) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, model_choice: modelChoice })
     });
-    
+
     if (!backendResponse.ok) {
         throw new Error(`SpamX Backend analysis failed (Status: ${backendResponse.status})`);
     }
-    
+
     return await backendResponse.json();
 }

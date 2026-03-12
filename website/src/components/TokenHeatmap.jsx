@@ -17,18 +17,22 @@ export default function TokenHeatmap({ explanation, prediction }) {
                 </div>
             </div>
 
-            <div className="bg-[#0f172a]/60 backdrop-blur-2xl border border-white/5 rounded-3xl p-6 flex flex-wrap gap-3 shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
+            <div className="bg-[#0B0F19] border border-white/10 rounded-2xl p-4 flex flex-wrap gap-3 shadow-lg">
                 {explanation.tokens.map((token, idx) => {
                     const val = explanation.values[idx];
                     const absVal = Math.abs(val);
                     const alpha = Math.min(0.9, 0.1 + (absVal / maxAbsVal) * 0.8);
 
-                    // Python logic: Red if v > 0 (Spam trigger), Blue if v < 0 (Legitimate)
-                    // We align with the prediction to show supporting tokens in the correct color:
-                    const supportsHam = isHamVerdict ? val > 0 : val < 0;
+                    const isPositive = val > 0;
+                    const isSpamVerdict = prediction?.label?.toUpperCase() === 'SPAM';
+                    
+                    // Adaptive logic:
+                    // If prediction is Spam: Positive=Red (Rose), Negative=Green (Emerald)
+                    // If prediction is Ham: Positive=Green (Emerald), Negative=Red (Rose)
+                    const useRose = isSpamVerdict ? isPositive : !isPositive;
 
-                    const bgRGB = supportsHam ? '16, 185, 129' : '244, 63, 94';
-                    const glowRGB = supportsHam ? '5, 150, 105' : '225, 29, 72';
+                    const bgRGB = useRose ? '244, 63, 94' : '16, 185, 129';
+                    const glowRGB = useRose ? '225, 29, 72' : '5, 150, 105';
 
                     const bgClass = `rgba(${bgRGB}, ${alpha})`;
 
@@ -48,11 +52,10 @@ export default function TokenHeatmap({ explanation, prediction }) {
                                 </span>
                             </div>
 
-                            {/* Tooltip on hover for exact value and details */}
                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 whitespace-nowrap pointer-events-none z-[100] opacity-0 group-hover/tok:opacity-100 transition-all duration-300 transform group-hover/tok:-translate-y-1">
                                 <div className="bg-[#0B0F19]/95 backdrop-blur-xl border border-white/10 rounded-2xl px-4 py-2 shadow-2xl flex flex-col items-center">
                                     <span className="text-slate-400 font-black uppercase text-[8px] tracking-[0.2em] mb-1">SHAP Attribution</span>
-                                    <span className={`font-mono font-black text-lg ${supportsHam ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    <span className={`font-mono font-black text-lg ${useRose ? 'text-rose-400' : 'text-emerald-400'}`}>
                                         {val.toFixed(4)}
                                     </span>
                                 </div>
@@ -63,9 +66,8 @@ export default function TokenHeatmap({ explanation, prediction }) {
                 })}
             </div>
             <p className="mt-4 text-[10px] text-slate-500 font-medium italic text-center">
-                * Color intensity reflects the strength of association with {isHamVerdict ? 'Legitimate' : 'Spam'} patterns.
+                {/* * Color intensity reflects the isolated Shapley influence strength of the token over the decision boundary. */}
             </p>
         </div>
     );
 }
-
