@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #6366f1;
+  --color-brand-secondary: #8b5cf6;
+  --color-brand-accent: #ec4899;
+  --color-brand-success: #10b981;
+  --color-brand-danger: #ef4444;
+  --color-brand-background: #020617;
+
+  --font-heading: "Space Grotesk", "Outfit", "Inter", sans-serif;
+  --font-body: "Outfit", "Inter", sans-serif;
+}
+
+body {
+  background-color: #0f172a;
+  color: #f8fafc;
+  font-family: "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  width: 320px;
+  margin: 0;
+  overflow: hidden;
+}
+
+
+
+
+.spamx-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: white;
+  z-index: 10;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+  margin-right: 8px;
+  font-size: 10px;
+  padding: 2px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.spamx-hidden {
+  display: none !important;
+}
